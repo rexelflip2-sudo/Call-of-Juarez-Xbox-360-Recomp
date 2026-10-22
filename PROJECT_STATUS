@@ -1,0 +1,28 @@
+# Project Status
+
+Last reviewed: 2026-10-21. This is a snapshot of evidence available in the local source and conversation, not a claim that every stage has been independently reproduced in one run.
+
+## Verified in local files/builds
+
+- The source tree contains a ReXGlue 0.10.0 project, a large generated translation, Xenos GPU configuration, recovered function-pointer targets, host application hooks, and third-party license notices.
+- Ghidra scripts are present for full pseudocode export, candidate static code-target export, address/range inspection, and disassembly of undefined ranges.
+- The Windows Forms converter source extracts an ISO, checks for root `default.xex`, runs ReXGlue codegen, configures/builds Windows x64, applies runtime compatibility patches, and packages the result.
+- The latest converter build produced a Windows executable with 0 compiler warnings and 0 errors after the patcher was changed to locate `sub_82D88880` across generated shards.
+
+## User-reported runtime observations
+
+- Earlier builds rendered menu/loading content; the user reported that textures improved over successive builds.
+- The user reported at least one run entered gameplay, then crashed later.
+- The user previously described the recomp as working without issues, but later reports include crashes. Treat runtime stability as unresolved until a repeatable current test confirms it.
+
+## Not confirmed yet
+
+- A full ISO conversion succeeding with the latest `ConverterFixed4` binary.
+- A repeatable first-level load and stable gameplay session on the latest native build.
+- Root cause for the loading/gameplay crash or a final fix.
+- Full compatibility for graphics, audio, input, save data, and later missions.
+
+## Recommended next evidence
+
+Run the latest converter against the same supported ISO into a new/empty destination. If conversion succeeds, run `run_callofjuarez360.cmd` and preserve complete output through the first level transition and gameplay. Record binary timestamp, input sequence, and the entire crash-probe section if it fails. Update this file with the concrete result before marking any milestone complete.
+
