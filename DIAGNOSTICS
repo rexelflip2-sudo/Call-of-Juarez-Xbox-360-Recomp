@@ -1,0 +1,50 @@
+# Diagnostics and Troubleshooting
+
+## First response to a crash
+
+Preserve the exact executable, PDB if available, game-data folder, launch command, and complete runtime log. Reproduce the same menu/input sequence and record the last visible/loading stage. Avoid changing the manifest, generated code, and runtime at once.
+
+For a memory fault, collect the actual faulting guest instruction and its effective address from guest registers. Do not infer the cause from the displayed address alone. Compare the guest PC and register state with Ghidra’s instruction listing and the matching generated function. Use host module/RVA and PDB symbols for the native side, but do not confuse a host crash address with a guest address.
+
+## Existing probes
+
+`src/callofjuarez360_app.h` installs an observe-only guest exception probe. It logs exception kind/operation, process/thread IDs, guest thread and PC, host PC/module RVA, host and guest fault addresses, queried page metadata, `GAME_DATA`, uptime, host instruction bytes, host registers, PPC registers, and a guest-stack snapshot. It returns `false` so the runtime’s normal exception handlers still process the exception.
+
+Generated-source diagnostics include:
+
+- `[lr-guard]`: direct translated-call return mismatch. Check expected vs actual LR, guest `r1`, `r3`, `r31`, and the last indirect target.
+- `[indirect-miss]` / `[indirect-miss-gpr]`: unresolved indirect target and guest state. Check the target in Ghidra; do not register it based only on the log.
+- `[guest-resume]`: resume loop at `sub_82D88880`; compare LR, stack pointer, and the guest setjmp/longjmp path.
+- Process/CMake output: identify the phase named by the converter and read the first underlying tool error, not only the final nonzero exit code.
+
+The one-off `work/recomp/trace_lr_guards_probe.py` is tied to a particular local workspace path and generated-output count. Adapt it before reuse. The C# compatibility patcher is the maintained path; do not copy its expected count from an unrelated probe or older codegen run.
+
+## Converter errors seen during development
+
+| Symptom | Interpretation and check |
+|---|---|
+| “A required project build is missing” or project not found | The converter walks parent folders looking for the recomp project and local toolchain. Keep `CallOfJuarez360Recomp` and `toolchain` in the supported root layout, or use the development workspace’s `work/recomp` and `work/toolchain`. Do not launch from a copied app folder that has no project/toolchain ancestors. |
+| `VsDevCmd.bat` is not recognized | Start `cmd.exe` in the Visual Studio `Common7\Tools` directory and invoke `call VsDevCmd.bat -no_logo -arch=amd64 -host_arch=amd64 && set`. Avoid malformed nested quoting around the `.bat` path. |
+| Clang CMake compiler test fails with `undefined symbol: mainCRTStartup` | Check the actual compiler/link command. A common cause is x86 VS environment tools or `lld-link` being selected for an x64 target. Load the x64 environment, select x64 `link.exe` explicitly, and make sure bundled Clang tools resolve correctly. |
+| ReXGlue CMake package missing | Restore the local SDK and verify `rexglue/win-amd64/lib/cmake/rexglue/rexglueConfig.cmake`. Do not substitute a different SDK/version without checking generated API compatibility. |
+| `Could not identify the resume-sensitive translated call` | Older patcher expected an exact tab-formatted call line. Current source locates the unique `0x82D88974` guest return site and matches the following translated call with flexible whitespace. |
+| `Could not find translated function sub_82D88880` | ReXGlue moved the function to another source shard. Current source searches all `callofjuarez360_recomp.*.cpp` files; do not restore a fixed `.101.cpp` assumption. |
+| Direct-call-site count differs | The ISO, manifest, ReXGlue build, or generated revision may differ. Inspect generated input and compare against the supported target before changing the expected count. Never skip the guard after a count mismatch without reviewing why. |
+| Conversion failed but stage folder is gone | The converter removes its temporary stage after success or failure. Save the visible converter log, including the phase and trailing tool output. If more detail is required, instrument/preserve the stage in a controlled debug build. |
+| Install folder rejected | Use a new/empty directory or the same folder with a valid `callofjuarez360.install.json` created by this converter. It refuses to overwrite unrelated contents. |
+
+## Game-load and runtime status
+
+Historical user reports include a crash after difficulty selection, loading-screen texture changes across builds, and one run that entered the game before a later crash. These observations do not establish a root cause. A mission note also recorded a guest read at `0x000001A4`; verify it against the newest crash probe before using it as current evidence.
+
+Check the selected ISO’s actual directory tree when investigating file/archive issues. The current workspace extraction contains `Data0.pak`, language-specific `Data*.pak` and `Speech*.pak` files, `default.xex`, and a `Data/` directory. An older attached note described Xbox content as `.rpack`; that note conflicts with the current extraction and must not be treated as authoritative without checking the exact ISO/build.
+
+When testing a new runtime build, record:
+
+1. Exact build output path and timestamp.
+2. Exact `game_data` installation and launch script.
+3. Input sequence and time from launch to failure.
+4. Full probe/log output and last successfully completed stage.
+5. Whether the process exited, raised a guest exception, or remained stuck.
+
+Compare captures from successive builds. A changed texture, longer loading, or later crash indicates changed execution but is not by itself proof that the underlying issue is fixed.
