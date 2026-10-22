@@ -1,0 +1,50 @@
+# Reverse-Engineering and Ghidra Workflow
+
+## Inputs and interpretation
+
+Use `default.xex` extracted from the user-provided Xbox 360 ISO as the primary analysis target. Ghidra 12.1.4 and the XEXLoaderWV extension were used in this workspace. Import the XEX as Xbox 360 PowerPC code, confirm the loader/program metadata and executable memory blocks, and allow analysis to complete before interpreting function boundaries.
+
+The installed Windows version and its engine DLLs are comparison references only. Keep each binary in a separate Ghidra program, verify versions/build identity, and do not treat PC function names or behavior as proof of Xbox behavior.
+
+To cover both editions, analyze the Xbox `default.xex` and each available Windows executable/DLL as separate programs. Run `ExportAllDecomp.java` separately for each and keep the filenames/notes labeled by edition and module. Compare a routine only after matching its purpose and call context; the PC version may use different resources, interfaces, or control flow.
+
+## Repeatable analysis loop
+
+1. Preserve a copy of the project and record the input binary identity, Ghidra version, loader, and analysis options.
+2. Decompile a broad view when needed with `work/ghidra_scripts/ExportAllDecomp.java`. It exports Ghidra pseudocode for each non-external function; it does not recover the original source.
+3. For an unresolved indirect-call candidate, run `ExportStaticCodeTargets.java`. It searches data references from non-executable memory into executable memory, keeps targets with instructions, and writes target/source/containing-function addresses as CSV. This is a candidate list, not proof that every row is a function.
+4. Inspect candidates with `InspectTargets.java` or `InspectRange.java`. Review function boundaries, previous and next functions, instruction words, references, and surrounding control flow.
+5. If code is executable but Ghidra left it undefined, use `DisassembleRange.java` on a narrow, verified range, then inspect the new boundaries and references.
+6. Add a function entry to `[entrypoint.functions]` only after confirming a plausible instruction boundary and callable target. Keep addresses exact and use neutral `CallTarget_<address>` names until semantics are established.
+7. Re-run ReXGlue codegen and inspect the generated function/dispatch output to confirm that the target was included and routed as expected.
+
+## Running scripts
+
+The scripts are ordinary Ghidra Java scripts. In the Ghidra GUI, add `work/ghidra_scripts` to the Script Manager search path, select the active program, and run the script. The target/range scripts take hexadecimal addresses in their documented argument order. `ExportAllDecomp` takes one output-directory argument; `ExportStaticCodeTargets` takes an output-file path.
+
+For headless analysis, the standard Ghidra command shape is:
+
+```text
+analyzeHeadless <project-directory> <project-name> -import <default.xex> \
+  -scriptPath <path-to-ghidra_scripts> \
+  -postScript ExportAllDecomp.java <decomp-output-directory>
+```
+
+Use a disposable project or a fresh project name when changing import options. Check the headless log for the selected XEX loader, script execution, decompilation totals, and save result. Keep the exact command and log with the analysis result.
+
+## Static target recovery
+
+The manifest already contains many manually recovered targets. A static data reference can point into the middle of a function, jump table, thunk, or instruction sequence, so validate it before registration:
+
+- Confirm executable memory and decoded PowerPC instructions at the target.
+- Check whether the target is already within a known function or is a plausible new entry.
+- Inspect its prologue, callers/references, return behavior, and generated representation.
+- Distinguish a direct call from a function-pointer call and preserve the expected ABI/state.
+- Record the provenance (Ghidra reference, instruction evidence, runtime trace) in a concise manifest comment or analysis note.
+
+The manually named `CallTarget_<address>` entries in the manifest are addresses, not recovered semantic function names. Avoid deduplicating or removing them without tracing which indirect target they satisfy.
+
+## Keep artifacts interpretable
+
+Name exports with the program/binary identity and date. Store large decompilation exports and Ghidra databases locally, not in the source repository. When citing decompiler output, record the Ghidra address and check the corresponding instruction listing. A pseudocode expression may hide PowerPC condition-register behavior, pointer arithmetic, or an inaccurate function boundary.
+
