@@ -1,0 +1,69 @@
+# Build and Converter Guide
+
+## Project pieces
+
+```text
+CallOfJuarez360Recomp/
+  callofjuarez360_manifest.toml   # XEX entrypoint, setjmp/longjmp, recovered targets
+  CMakeLists.txt                  # ReXGlue target, Xenos GPU plugin
+  CMakePresets.json               # platform/build presets
+  generated/rexglue.cmake         # ReXGlue CMake setup
+  generated/default/              # translated C++ and registration, generated
+  src/main.cpp                    # REX_DEFINE_APP entrypoint
+  src/callofjuarez360_app.h       # Windows app hooks and crash probe
+  licenses/                       # included third-party license notices
+
+CallOfJuarez360Converter/
+  Program.cs                      # GUI, ISO extraction, configure/build/package
+  CompatibilityPatcher.cs         # generated-code hooks and diagnostics
+```
+
+`CMakeLists.txt` builds the `callofjuarez360` executable and calls `rexglue_setup_target(... GPU_PLUGINS xenos)`. The manifest currently specifies ReXGlue 0.10.0, `default.xex`, guest root, `setjmp_address = 0x82F92260`, and `longjmp_address = 0x82F92140`, plus recovered entrypoint/indirect-call targets. Keep these matched to the supported ISO and ReXGlue version.
+
+## Converter pipeline
+
+`Program.cs` runs the following stages in a unique `.coj-converter-stage-*` directory under the selected install folder:
+
+1. Validate the `.iso` input and install destination.
+2. Run `extract-xiso -x -s -d <stage>/game_data <iso>` and require `default.xex` at the extracted root.
+3. Copy the recomp template into the stage and rewrite `game_root` and `file_path` to the extracted data.
+4. Run `rexglue codegen <manifest>`.
+5. Load the Visual Studio x64 developer environment; configure Ninja/CMake with bundled `clang-cl`, `llvm-lib`, the x64 MSVC `link.exe`, and the ReXGlue SDK.
+6. Build the `callofjuarez360_codegen` target, patch the generated source, then build `callofjuarez360`.
+7. Package the executable, every top-level runtime DLL, a launcher, a short README, and `game_data`.
+8. Commit the package into the chosen destination, backing up prior files recorded in the converter’s install manifest.
+
+The staging directory is removed in a `finally` block, including after a failed conversion. Use the error log and preserved diagnostic output to debug a failed run; do not assume the intermediate project still exists. When inspecting a live stage during an authorized run, copy out only the relevant small diagnostic artifacts before cleanup.
+
+## Important compatibility patches
+
+`CompatibilityPatcher.Apply` modifies generated source after codegen and before native compilation:
+
+- Adds an LR-return guard after translated direct calls. It logs mismatches with function, expected/actual LR, guest stack and selected registers.
+- Rewrites the indirect-call dispatch macro to log unresolved targets and relevant PowerPC state, with a cap on repeated miss logs.
+- Patches the setjmp/resume loop in `sub_82D88880`; it detects the guest resume continuation at `0x82D888D4` and preserves the expected translated control flow.
+- Validates the supported generated call-site count so a materially different codegen output fails with a diagnostic instead of being silently patched incompletely.
+
+The resume function must be located by searching all `callofjuarez360_recomp.*.cpp` shards. ReXGlue shard assignment is not stable. The resume call is anchored by guest return address `0x82D88974`, not by an exact tab-indented line or a fixed shard number. Keep this logic idempotent and update its error text when adding new validation.
+
+## Manual native build notes
+
+The converter’s CMake configuration is the authoritative Windows x64 recipe. Relevant settings are:
+
+- Generator: Ninja.
+- C and C++ compiler: bundled `clang-cl.exe`.
+- Archiver: bundled `llvm-lib.exe`.
+- Linker: x64 `link.exe` from the Visual Studio toolchain.
+- Package prefix: local ReXGlue SDK directory.
+- Target: `callofjuarez360`, with Xenos plugin configured by CMake.
+
+Load the developer environment with `VsDevCmd.bat -no_logo -arch=amd64 -host_arch=amd64`. Run it from its own Visual Studio tools directory using `call VsDevCmd.bat ... && set` and parse the resulting environment. Do not hand-quote the batch-file path as the command text. Ensure x64 tools are selected and pass the MSVC linker explicitly; otherwise CMake may probe with a mismatched linker/SDK and fail on `mainCRTStartup`.
+
+Build the converter UI from repository root with:
+
+```powershell
+dotnet build .\CallOfJuarez360Converter\CallOfJuarezConverter.csproj -c Release
+```
+
+The toolchain is local-only and ignored by Git. The source repository includes project/runtime source and license notices, but not the user’s ISO, extracted game data, compiled game, or runtime DLLs.
+
